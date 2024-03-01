@@ -1,0 +1,214 @@
+#lang racket
+
+(require data/maybe)
+
+(define while-checker #f) ;global "variable" used to check if a whileloop is ongoing
+(define linenum 0)
+
+;tokenizing the stuff here
+(define (tokenize string)
+  (cond
+    [(equal? "=" string) 'equals]
+    [(equal? "if" string) 'if]
+    [(equal? "then" string) 'then]
+    [(equal? "read" string) 'read]
+    [(equal? "write" string) 'write]
+    [(equal? "goto" string) 'goto]
+    [(equal? "gosub" string) 'gosub]
+    [(equal? "return" string) 'return]
+    [(equal? "(" string) 'l-parens]
+    [(equal? ")" string) 'r-parens]
+    [(equal? "+" string) 'plus]
+    [(equal? "-" string) 'minus]
+    [(equal? ":" string) 'colon]
+    [(equal? "*" string) 'mult]
+    [(isnum string) 'num]
+    [(isid string) 'id]
+    [else
+     'UNKNOWN-SYMBOL]))
+
+;parse the file
+(define (parse filename)
+  (begin
+    ;read in some line numbers
+    (define filelist (file->lines filename))
+    ;send input file to be evaluated by parser
+    (filechecker filelist)))
+
+;filechecker - this checks to make sure the file is a list of lines that has the final line being $$. program -> linelist $$
+(define (filechecker in)
+  (and (linelist in)
+       (equal? (last in) "$$ ")))
+
+;linelist - this checks if the linelist is line or the end. linelist -> line linelist | epsilon
+(define (linelist in)
+  (or (equal? (car in) "$$ ") ;this would be the end of the file
+      (and (line (car in)) ;checks the first value of the list if its a line
+           (linelist (cdr in))))) ;recursively calls this with the rest of the list until it finds the $$ or the list ends
+
+;line - checks if the line is made up of index statement and a linetail. line -> label stmt linetail
+(define (line in)
+  (define my-list (split-by-par in)) ;this is the first split. Here i need to split it by spaces AND parenthesis
+  (increment linenum)
+  ;(define (my-new-list my-list(map (lambda (str) (string-split str [#rx"[\\(\\)]" #:trim? #f])) my-list)))
+  ;(define token-list (regexp-split (pregexp "((?=\\()|(?<!\\()(?=\\))|(?<!\\))(?=$))") in))
+  ;(define tokens (append '(label) (map tokenize (cdr my-list))))
+  (cond
+    [(and (label (car my-list)) (statement (cdr my-list)) (linetail (last my-list))) ;checks if theres the label and a statement, if not returns false
+     (just #t)]
+    [(and (statement my-list) (linetail (last my-list)))
+     (just #t)]
+    ;[(member 'UNKNOWN-SYMBOL tokens)
+     ;(display (format "Unknown operator detected")) #f]
+    [else (display (format "Invalid line detected on line: ~a\n" linenum)) #f]))
+
+(define (split-by-par in)
+  (filter (lambda (str) (not (equal? "" str)))
+  (filter non-empty-string?
+          (regexp-split (pregexp "((?=\\()|(?<=\\()|(?=\\))|(?<=\\))|(\\s+))") in))))
+
+;label - label -> id: | epsilon
+(define (label in)
+  (begin (cond
+           [(empty? in) #t]
+           [(colonsplit in) #t]
+           [else #f])))
+
+;colonsplit - helper function for checking id:. id without a colon also seems to be valid
+(define (colonsplit in)
+  (define my-list (regexp-split (pregexp "((?=:)|(?<!:)(?=$))") in))
+  (cond
+    [(and (id (car my-list)) (equal? (last my-list) ":")) #t]
+    [else #f]))
+  
+;linetail - either a statement or the end. linetail -> ;stmt+ | epsilon
+(define (linetail in)
+  #t)
+
+;Statement can be a ton of stuff so here's the list of it all
+;stmt -> id = expr
+;    | if (boolean) stmt
+;    | while (boolean) linelist endwhile
+;    | read id
+;    | write expr
+;    | goto id
+;    | gosub id
+;    | return
+;    | break
+;    | end
+
+(define (statement in)
+  (begin (cond
+           [(and (> (length in) 1) (id (car in)) (equal? (cadr in) "=") (expression (cdr (cdr in)))) (just #t)] ;should be an id, then an =, then an expression to set the id equal to. id = expr
+           [(and (equal? (car in) "if") (boolean (cdr in))) (just #t)] ;checks for an if then passes everything else to check the bool in a substatement. if bool statment
+           [(and (equal? (car in) "while") (boolean (cdr in))) (change-while #t) (just #t)]
+           [(and (equal? while-checker #t) (equal? (car in) "endwhile")) (change-while #f) (just #t)]
+           [(and (> (length in) 1) (equal? (car in) "read") (id (cadr in))) (just #t)] ;if we're reading in something, first element is read second is what to read. read id
+           [(and (equal? (car in) "write") (expression (cdr in))) (just #t)] ;if were writing, its write then check if we're writing an expression
+           [(and (> (length in) 1) (equal? (car in) "goto") (id (cadr in))) (just #t)] ;if we're going somewhere, first is goto second is where to go. goto id
+           [(and (> (length in) 1) (equal? (car in) "gosub") (id (cadr in))) (just #t)] ;if we're going to a subroutine, first is gosub, second is where to go
+           [(and (equal? (length in) 1) (equal? (car in) "return")) (just #t)] ;returns its own thing so if its just return we're cool
+           [(and (equal? (length in) 1) (equal? (car in) "break")) (just #t)] ;hoping that break and end work the same as return. break
+           [(and (equal? (length in) 1) (equal? (car in) "end")) (just #t)] ;end
+           [else (display (format "Invalid statement detected on line: ~a\n" linenum)) #f])))
+
+;change-while in. helper function for checking for while loops
+(define (change-while in)
+  (set! while-checker in))
+
+(define (increment in)
+  (set! linenum (+ 1 in)))
+
+;boolean -> true | false | expr bool-op expr
+(define (boolean in)
+  (define my-list1 (list (car in) (cadr in)))
+  (define my-list2 (caddr in))
+  (define my-list3 (cdddr in))
+   (cond
+           [(equal? in "true") (just #t)] ;if its just true return true youre fine
+           [(equal? in "false") (just #t)] ;if its just false its fine dw about it
+           [(and (expression my-list1) (bool-op my-list2) (par-expr my-list3)) (just #t)] ;this seems something to worry about. just call to see if its an expression first, a bool op second, and an expression for the rest of it.
+           [else (display (format "Invalid boolean detected on line: ~a\n" (linenum))) #f]))
+
+
+;bool-op -> < | > | >= | <= | <> | =
+(define (bool-op in)
+  (begin (cond
+           [(equal? in "<") (just #t)]
+           [(equal? in ">") (just #t)]
+           [(equal? in ">=") (just #t)]
+           [(equal? in "<=") (just #t)]
+           [(equal? in "<>") (just #t)]
+           [(equal? in "=") (just #t)]
+           [else #f])))
+
+;expr -> id etail | num etail | (expr)
+(define (expression in)
+  (begin (cond
+           [(empty? in) (just #t)] ;if the expression is empty we're good
+           [(and (equal? (car in) "(") (par-expr (cdr in))) (just #t)]
+           [(and (id (car in)) (etail (cdr in))) (just #t)]
+           [(and (num (car in)) (etail (cdr in))) (just #t)]
+           [else (display (format "Invalid expression detected on line: ~a\n" linenum)) #f])))
+
+;parenthesis-expr
+(define (par-expr in)
+  (begin (cond
+           [(empty? in) (just #t)]
+           [(and (id (car in)) (par-etail (cdr in))) (just #t)]
+           [(and (num (car in)) (par-etail (cdr in))) (just #t)]
+           [(and (equal? (car in) "(") (par-expr (cdr in))) (just #t)]
+           [else #f])))
+
+;par-etail -> + expr | - expr | * expr | / expr | epsilon
+(define (par-etail in)
+  (begin (cond
+           [(empty? in) (just #t)]
+           [(and (equal? (car in) ")") (etail (cdr in))) (just #t)]
+           [(and (equal? (car in) "+") (par-expr (cdr in))) (just #t)]
+           [(and (equal? (car in) "-") (par-expr (cdr in))) (just #t)]
+           [(and (equal? (car in) "*") (par-expr (cdr in))) (just #t)]
+           [(and (equal? (car in) "/") (par-expr (cdr in))) (just #t)]
+           [else #f])))
+
+
+;etail -> + expr | - expr | * expr | / expr | epsilon
+(define (etail in)
+  (begin (cond
+           [(empty? in) (just #t)]
+           [(and (equal? (car in) "+") (expression (cdr in))) (just #t)]
+           [(and (equal? (car in) "-") (expression (cdr in))) (just #t)]
+           [(and (equal? (car in) "*") (expression (cdr in))) (just #t)]
+           [(and (equal? (car in) "/") (expression (cdr in))) (just #t)]
+           [(and (equal? (car in) ";") (statement (cdr in))) (just #t)]
+           [else #f])))
+
+;id -> [a-zA-Z][a-zA-Z0-9]*
+(define (id in)
+    (regexp-match? #rx"^[a-zA-Z][a-zA-Z0-9]*$" in ))
+
+;num -> numsign digit digit*
+(define (num in)
+  (begin (cond
+           [(regexp-match? #rx"^[+-][0-9]+$" in) #t]
+           [(regexp-match? #rx"^[0-9]+$" in) #t]
+           [else #f])))
+
+;numsign -> + | - | epsilon
+(define (numsign in)
+  (regexp-match? #rx"[+-]" (string in)))
+
+;digit -> [0-9]
+(define (digit in)
+  (regexp-match? #rx"^[0-9]$" (string in)))
+
+;isid
+(define (isid word)
+    (regexp-match? #rx"^([a-zA-Z]+)$") (string word))
+
+;isnum
+(define (isnum word)
+  (or (regexp-match? #rx"^[1-9][0-9]*$" word)
+      (equal? word "0")))
+
+(parse "file01.txt")
