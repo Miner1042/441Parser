@@ -22,6 +22,7 @@
     [(equal? "-" string) 'minus]
     [(equal? ":" string) 'colon]
     [(equal? "*" string) 'mult]
+    [(equal? "/" string) 'div]
     [(isnum string) 'num]
     [(isid string) 'id]
     [else
