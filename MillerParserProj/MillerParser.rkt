@@ -26,7 +26,7 @@
     [(isnum string) 'num]
     [(isid string) 'id]
     [else
-     'UNKNOWN-SYMBOL]))
+     'UNKNOWN]))
 
 ;parse the file
 (define (parse filename)
@@ -59,7 +59,7 @@
      (just #t)]
     [(and (statement my-list) (linetail (last my-list)))
      (just #t)]
-    ;[(member 'UNKNOWN-SYMBOL tokens)
+    ;[(member 'UNKNOWN tokens)
      ;(display (format "Unknown operator detected")) #f]
     [else (display (format "Invalid line detected on line: ~a\n" linenum)) #f]))
 
